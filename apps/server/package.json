@@ -1,0 +1,31 @@
+{
+  "name": "@draw-and-guess/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "start": "node dist/apps/server/src/index.js",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "prisma": "prisma"
+  },
+  "dependencies": {
+    "@draw-and-guess/shared": "workspace:*",
+    "@prisma/client": "^6.2.1",
+    "@socket.io/redis-adapter": "^8.3.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "socket.io": "^4.8.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "prisma": "^6.2.1",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8"
+  }
+}

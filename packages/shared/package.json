@@ -1,0 +1,19 @@
+{
+  "name": "@draw-and-guess/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "echo \"shared package has no tests\"",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  }
+}
