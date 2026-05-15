@@ -328,10 +328,14 @@ function CanvasBoard({
   const [mode, setMode] = useState<"draw" | "erase">("draw");
   const pointsRef = useRef<DrawPoint[]>([]);
   const drawingRef = useRef(false);
+  const strokeSignature = useMemo(() => snapshot.strokes.map((stroke) => stroke.id).join("|"), [snapshot.strokes]);
+  const strokesRef = useRef(snapshot.strokes);
+  strokesRef.current = snapshot.strokes;
 
   useEffect(() => {
-    redraw(canvasRef.current, snapshot.strokes);
-  }, [snapshot.strokes]);
+    redraw(canvasRef.current, strokesRef.current);
+    drawPreview(canvasRef.current, pointsRef.current, session.playerId, color, width, mode);
+  }, [color, mode, session.playerId, strokeSignature, width]);
 
   function pointerPoint(event: React.PointerEvent<HTMLCanvasElement>): DrawPoint {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -411,6 +415,10 @@ function redraw(canvas: HTMLCanvasElement | null, strokes: DrawStroke[]) {
   }
   context.clearRect(0, 0, canvas.width, canvas.height);
   strokes.forEach((stroke) => drawStroke(canvas, stroke));
+}
+
+function drawPreview(canvas: HTMLCanvasElement | null, points: DrawPoint[], playerId: string, color: string, width: number, mode: "draw" | "erase") {
+  drawStroke(canvas, { id: "preview", playerId, color, width, mode, points });
 }
 
 function drawStroke(canvas: HTMLCanvasElement | null, stroke: DrawStroke) {
