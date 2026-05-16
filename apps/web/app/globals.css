@@ -299,6 +299,7 @@ button:disabled {
 .canvas-stage {
   aspect-ratio: 4 / 3;
   background: white;
+  position: relative;
   width: 100%;
 }
 
@@ -307,6 +308,12 @@ canvas {
   height: 100%;
   touch-action: none;
   width: 100%;
+}
+
+.committed-canvas,
+.preview-canvas {
+  inset: 0;
+  position: absolute;
 }
 
 .sidebar,

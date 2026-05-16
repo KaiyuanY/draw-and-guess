@@ -323,19 +323,51 @@ function CanvasBoard({
   isDrawer: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [color, setColor] = useState(COLORS[0]);
   const [width, setWidth] = useState(6);
   const [mode, setMode] = useState<"draw" | "erase">("draw");
+  const colorRef = useRef(color);
+  const widthRef = useRef(width);
+  const modeRef = useRef(mode);
   const pointsRef = useRef<DrawPoint[]>([]);
   const drawingRef = useRef(false);
+  const activePointerIdRef = useRef<number | null>(null);
+  const finishStrokeRef = useRef<() => void>(() => undefined);
+  const windowPointerEndRef = useRef<() => void>(() => finishStrokeRef.current());
+  const pendingStrokesRef = useRef<DrawStroke[]>([]);
+  const lastTurnRef = useRef(`${snapshot.roomId}:${snapshot.turnIndex}`);
   const strokeSignature = useMemo(() => snapshot.strokes.map((stroke) => stroke.id).join("|"), [snapshot.strokes]);
   const strokesRef = useRef(snapshot.strokes);
   strokesRef.current = snapshot.strokes;
 
   useEffect(() => {
-    redraw(canvasRef.current, strokesRef.current);
-    drawPreview(canvasRef.current, pointsRef.current, session.playerId, color, width, mode);
-  }, [color, mode, session.playerId, strokeSignature, width]);
+    colorRef.current = color;
+    widthRef.current = width;
+    modeRef.current = mode;
+  }, [color, mode, width]);
+
+  useEffect(() => {
+    finishStrokeRef.current = finishStroke;
+  });
+
+  useEffect(() => {
+    const turnKey = `${snapshot.roomId}:${snapshot.turnIndex}`;
+    if (lastTurnRef.current !== turnKey || snapshot.phase !== "drawing") {
+      pendingStrokesRef.current = [];
+      lastTurnRef.current = turnKey;
+    } else {
+      const confirmedIds = new Set(snapshot.strokes.map((stroke) => stroke.id));
+      pendingStrokesRef.current = pendingStrokesRef.current.filter((stroke) => !confirmedIds.has(stroke.id));
+    }
+    redrawCommittedCanvas();
+  }, [snapshot.phase, snapshot.roomId, snapshot.turnIndex, strokeSignature]);
+
+  useEffect(() => {
+    if (!isDrawer || snapshot.phase !== "drawing") {
+      cancelDraftStroke();
+    }
+  }, [isDrawer, snapshot.phase]);
 
   function pointerPoint(event: React.PointerEvent<HTMLCanvasElement>): DrawPoint {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -346,63 +378,152 @@ function CanvasBoard({
   }
 
   function start(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (!isDrawer || snapshot.phase !== "drawing") {
+    if (!isDrawer || snapshot.phase !== "drawing" || (event.pointerType === "mouse" && event.button !== 0)) {
       return;
     }
+    event.preventDefault();
     drawingRef.current = true;
+    activePointerIdRef.current = event.pointerId;
     pointsRef.current = [pointerPoint(event)];
-    event.currentTarget.setPointerCapture(event.pointerId);
+    window.addEventListener("pointerup", windowPointerEndRef.current);
+    window.addEventListener("pointercancel", windowPointerEndRef.current);
   }
 
   function move(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (!drawingRef.current) {
+    if (!drawingRef.current || activePointerIdRef.current !== event.pointerId) {
       return;
     }
+    if (event.pointerType === "mouse" && event.buttons === 0) {
+      finishStroke();
+      return;
+    }
+    event.preventDefault();
     const point = pointerPoint(event);
     pointsRef.current.push(point);
-    drawStroke(canvasRef.current, { id: "preview", playerId: session.playerId, color, width, mode, points: pointsRef.current.slice(-2) });
+    const currentMode = modeRef.current;
+    const currentColor = colorRef.current;
+    const currentWidth = widthRef.current;
+    if (currentMode === "erase") {
+      drawStroke(canvasRef.current, { id: "preview", playerId: session.playerId, color: currentColor, width: currentWidth, mode: currentMode, points: pointsRef.current.slice(-2) });
+    } else {
+      drawStroke(previewCanvasRef.current, { id: "preview", playerId: session.playerId, color: currentColor, width: currentWidth, mode: currentMode, points: pointsRef.current.slice(-2) });
+    }
   }
 
-  function end() {
-    if (!drawingRef.current || pointsRef.current.length < 2) {
-      drawingRef.current = false;
+  function end(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (activePointerIdRef.current !== event.pointerId) {
       return;
     }
+    event.preventDefault();
+    finishStroke();
+  }
+
+  function finishStroke() {
+    if (!drawingRef.current || pointsRef.current.length < 2) {
+      cancelDraftStroke();
+      return;
+    }
+    commitDraftStroke();
+    cancelDraftStroke();
+  }
+
+  function commitDraftStroke() {
     const stroke: DrawStroke = {
-      id: crypto.randomUUID(),
+      id: createClientId(),
       playerId: session.playerId,
-      color,
-      width,
-      mode,
-      points: pointsRef.current
+      color: colorRef.current,
+      width: widthRef.current,
+      mode: modeRef.current,
+      points: [...pointsRef.current]
     };
+    pendingStrokesRef.current.push(stroke);
+    drawStroke(canvasRef.current, stroke);
     socket.emit("draw:stroke", { roomId: session.roomId, stroke });
+  }
+
+  function cancelDraftStroke() {
     drawingRef.current = false;
+    activePointerIdRef.current = null;
     pointsRef.current = [];
+    window.removeEventListener("pointerup", windowPointerEndRef.current);
+    window.removeEventListener("pointercancel", windowPointerEndRef.current);
+    clearCanvasSurface(previewCanvasRef.current);
+  }
+
+  function clearCanvas() {
+    pendingStrokesRef.current = [];
+    cancelDraftStroke();
+    clearCanvasSurface(canvasRef.current);
+    clearCanvasSurface(previewCanvasRef.current);
+    socket.emit("draw:clear", { roomId: session.roomId, playerId: session.playerId });
+  }
+
+  function redrawCommittedCanvas() {
+    redraw(canvasRef.current, displayStrokes());
+  }
+
+  function displayStrokes() {
+    if (pendingStrokesRef.current.length === 0) {
+      return strokesRef.current;
+    }
+    const confirmedIds = new Set(strokesRef.current.map((stroke) => stroke.id));
+    return [...strokesRef.current, ...pendingStrokesRef.current.filter((stroke) => !confirmedIds.has(stroke.id))];
+  }
+
+  function selectMode(nextMode: "draw" | "erase") {
+    finishStroke();
+    modeRef.current = nextMode;
+    setMode(nextMode);
+  }
+
+  function selectColor(nextColor: string) {
+    finishStroke();
+    modeRef.current = "draw";
+    colorRef.current = nextColor;
+    setMode("draw");
+    setColor(nextColor);
+  }
+
+  function selectWidth(nextWidth: number) {
+    finishStroke();
+    widthRef.current = nextWidth;
+    setWidth(nextWidth);
   }
 
   return (
     <section className="canvas-wrap">
       <div className="toolbar">
-        <button className={`icon-btn ${mode === "draw" ? "active" : ""}`} title="Brush" onClick={() => setMode("draw")} disabled={!isDrawer}>
+        <button className={`icon-btn ${mode === "draw" ? "active" : ""}`} title="Brush" onClick={() => selectMode("draw")} disabled={!isDrawer}>
           <Brush size={18} />
         </button>
-        <button className={`icon-btn ${mode === "erase" ? "active" : ""}`} title="Eraser" onClick={() => setMode("erase")} disabled={!isDrawer}>
+        <button className={`icon-btn ${mode === "erase" ? "active" : ""}`} title="Eraser" onClick={() => selectMode("erase")} disabled={!isDrawer}>
           <Eraser size={18} />
         </button>
         {COLORS.map((item) => (
-          <button key={item} className={`swatch ${item === color ? "active" : ""}`} title={item} style={{ "--swatch": item } as React.CSSProperties} onClick={() => setColor(item)} disabled={!isDrawer} />
+          <button key={item} className={`swatch ${item === color ? "active" : ""}`} title={item} style={{ "--swatch": item } as React.CSSProperties} onClick={() => selectColor(item)} disabled={!isDrawer} />
         ))}
-        <input className="range" title="Brush size" type="range" min="2" max="18" value={width} onChange={(event) => setWidth(Number(event.target.value))} disabled={!isDrawer} />
-        <button className="icon-btn" title="Clear" disabled={!isDrawer} onClick={() => socket.emit("draw:clear", { roomId: session.roomId, playerId: session.playerId })}>
+        <input className="range" title="Brush size" type="range" min="2" max="18" value={width} onChange={(event) => selectWidth(Number(event.target.value))} disabled={!isDrawer} />
+        <button className="icon-btn" title="Clear" disabled={!isDrawer} onClick={clearCanvas}>
           <Trash2 size={18} />
         </button>
       </div>
       <div className="canvas-stage">
-        <canvas ref={canvasRef} width={1200} height={900} onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
+        <canvas className="committed-canvas" ref={canvasRef} width={1200} height={900} />
+        <canvas className="preview-canvas" ref={previewCanvasRef} width={1200} height={900} onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
       </div>
     </section>
   );
+}
+
+function clearCanvasSurface(canvas: HTMLCanvasElement | null) {
+  if (!canvas) {
+    return;
+  }
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return;
+  }
+  context.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 function redraw(canvas: HTMLCanvasElement | null, strokes: DrawStroke[]) {
@@ -417,10 +538,6 @@ function redraw(canvas: HTMLCanvasElement | null, strokes: DrawStroke[]) {
   strokes.forEach((stroke) => drawStroke(canvas, stroke));
 }
 
-function drawPreview(canvas: HTMLCanvasElement | null, points: DrawPoint[], playerId: string, color: string, width: number, mode: "draw" | "erase") {
-  drawStroke(canvas, { id: "preview", playerId, color, width, mode, points });
-}
-
 function drawStroke(canvas: HTMLCanvasElement | null, stroke: DrawStroke) {
   if (!canvas || stroke.points.length < 2) {
     return;
@@ -433,6 +550,7 @@ function drawStroke(canvas: HTMLCanvasElement | null, stroke: DrawStroke) {
   context.lineCap = "round";
   context.lineJoin = "round";
   context.lineWidth = stroke.width;
+  context.globalCompositeOperation = stroke.mode === "erase" ? "destination-out" : "source-over";
   context.strokeStyle = stroke.mode === "erase" ? "#ffffff" : stroke.color;
   context.beginPath();
   const [first, ...rest] = stroke.points;
@@ -440,6 +558,17 @@ function drawStroke(canvas: HTMLCanvasElement | null, stroke: DrawStroke) {
   rest.forEach((point) => context.lineTo(point.x * canvas.width, point.y * canvas.height));
   context.stroke();
   context.restore();
+}
+
+function createClientId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function wordMask(length: number | null): string {
