@@ -230,9 +230,9 @@ function RoomView({
             <section className="chat-panel">
               <h2>Guesses</h2>
               <div className="guesses">
-                {snapshot.guesses.length === 0 ? <p className="muted">Wrong guesses will appear here.</p> : null}
+                {snapshot.guesses.length === 0 ? <p className="muted">Guesses will appear here.</p> : null}
                 {snapshot.guesses.map((item) => (
-                  <div className="guess" key={item.id}>
+                  <div className={`guess ${item.kind === "correct" ? "correct" : ""}`} key={item.id}>
                     <strong>{item.nickname}</strong>: {item.text}
                   </div>
                 ))}

@@ -158,6 +158,14 @@ export function submitGuess(state: RoomState, playerId: string, text: string): {
     if (drawer) {
       drawer.score += 1;
     }
+    state.guesses.push({
+      id: crypto.randomUUID(),
+      playerId,
+      nickname: player.nickname,
+      kind: "correct",
+      text: "guessed it right!",
+      createdAt: Date.now()
+    });
     return { state, correct: true };
   }
 
@@ -165,6 +173,7 @@ export function submitGuess(state: RoomState, playerId: string, text: string): {
     id: crypto.randomUUID(),
     playerId,
     nickname: player.nickname,
+    kind: "wrong",
     text: text.slice(0, 120),
     createdAt: Date.now()
   };

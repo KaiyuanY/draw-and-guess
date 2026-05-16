@@ -24,18 +24,26 @@ describe("game engine", () => {
     expect(state.players.find((player) => player.id === drawerId)?.score).toBe(2);
   });
 
-  it("keeps wrong guesses public and correct guesses private", () => {
+  it("keeps wrong guesses public and announces correct guesses without revealing the word", () => {
     const state = createStartedRoom();
     const drawerId = state.drawerId!;
     const guesser = state.players.find((player) => player.id !== drawerId)!;
 
     const wrong = submitGuess(state, guesser.id, "definitely wrong");
     expect(wrong.guess?.text).toBe("definitely wrong");
+    expect(wrong.guess?.kind).toBe("wrong");
     expect(state.guesses).toHaveLength(1);
 
     const correct = submitGuess(state, guesser.id, state.currentWord!);
     expect(correct.guess).toBeUndefined();
-    expect(state.guesses).toHaveLength(1);
+    expect(state.guesses).toHaveLength(2);
+    expect(state.guesses.at(-1)).toMatchObject({
+      playerId: guesser.id,
+      nickname: guesser.nickname,
+      kind: "correct",
+      text: "guessed it right!"
+    });
+    expect(state.guesses.at(-1)?.text).not.toContain(state.currentWord!);
     expect(guesser.hasGuessedCorrectly).toBe(true);
   });
 

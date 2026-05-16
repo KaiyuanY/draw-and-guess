@@ -19,6 +19,7 @@ export interface ChatGuess {
   id: string;
   playerId: string;
   nickname: string;
+  kind: "wrong" | "correct";
   text: string;
   createdAt: number;
 }
